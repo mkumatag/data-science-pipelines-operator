@@ -42,9 +42,6 @@ type DSPASpec struct {
 	*ObjectStorage `json:"objectStorage"`
 	*MLMD          `json:"mlmd,omitempty"`
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:default:={deploy: false}
-	*CRDViewer `json:"crdviewer"`
-	// +kubebuilder:validation:Optional
 	// +kubebuilder:default:="v1"
 	DSPVersion string `json:"dspVersion,omitempty"`
 	// WorkflowController is an argo-specific component that manages a DSPA's Workflow objects and handles the orchestration of them with the central Argo server
@@ -59,56 +56,16 @@ type APIServer struct {
 	Deploy bool `json:"deploy"`
 	// Specify a custom image for DSP API Server.
 	Image string `json:"image,omitempty"`
-	// Default: true
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	ApplyTektonCustomResource bool `json:"applyTektonCustomResource"`
-	// Default: false
-	// +kubebuilder:default:=false
-	// +kubebuilder:validation:Optional
-	ArchiveLogs   bool   `json:"archiveLogs"`
-	ArtifactImage string `json:"artifactImage,omitempty"`
-	CacheImage    string `json:"cacheImage,omitempty"`
-	// Image used for internal artifact passing handling within Tekton taskruns. This field specifies the image used in the 'move-all-results-to-tekton-home' step.
-	MoveResultsImage         string `json:"moveResultsImage,omitempty"`
-	*ArtifactScriptConfigMap `json:"artifactScriptConfigMap,omitempty"`
-	// Inject the archive step script. Default: true
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	InjectDefaultScript bool `json:"injectDefaultScript"`
-	// Default: true
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	StripEOF bool `json:"stripEOF"`
-	// Default: "Cancelled" - Allowed Values: "Cancelled", "StoppedRunFinally", "CancelledRunFinally"
-	// +kubebuilder:validation:Enum=Cancelled;StoppedRunFinally;CancelledRunFinally
-	// +kubebuilder:default:=Cancelled
-	TerminateStatus string `json:"terminateStatus,omitempty"`
-	// Default: true
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	TrackArtifacts bool `json:"trackArtifacts"`
-	// Default: 120
-	// +kubebuilder:default:=120
-	DBConfigConMaxLifetimeSec int `json:"dbConfigConMaxLifetimeSec,omitempty"`
-	// Default: true
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	CollectMetrics bool `json:"collectMetrics"`
 	// Create an Openshift Route for this DSP API Server. Default: true
 	// +kubebuilder:default:=true
 	// +kubebuilder:validation:Optional
 	EnableRoute bool `json:"enableOauth"`
 	// Include sample pipelines with the deployment of this DSP API Server. Default: true
-	// +kubebuilder:default:=true
+	// +kubebuilder:default:=false
 	// +kubebuilder:validation:Optional
-	EnableSamplePipeline bool `json:"enableSamplePipeline"`
-	// Default: true
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	AutoUpdatePipelineDefaultVersion bool   `json:"autoUpdatePipelineDefaultVersion"`
-	ArgoLauncherImage                string `json:"argoLauncherImage,omitempty"`
-	ArgoDriverImage                  string `json:"argoDriverImage,omitempty"`
+	EnableSamplePipeline bool   `json:"enableSamplePipeline"`
+	ArgoLauncherImage    string `json:"argoLauncherImage,omitempty"`
+	ArgoDriverImage      string `json:"argoDriverImage,omitempty"`
 	// Specify custom Pod resource requirements for this component.
 	Resources *ResourceRequirements `json:"resources,omitempty"`
 
@@ -118,6 +75,72 @@ type APIServer struct {
 	// server pod to trust this connection. CA Bundle should be provided
 	// as values within configmaps, mapped to keys.
 	CABundle *CABundle `json:"cABundle,omitempty"`
+
+	// CustomServerConfig is a custom config file that you can provide
+	// for the api server to use instead.
+	CustomServerConfig *ScriptConfigMap `json:"customServerConfigMap,omitempty"`
+
+	// Default: true
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	ApplyTektonCustomResource bool `json:"applyTektonCustomResource"`
+	// Default: false
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=false
+	// +kubebuilder:validation:Optional
+	ArchiveLogs bool `json:"archiveLogs"`
+	// Deprecated: DSP V1 only, will be removed in the future.
+	ArtifactImage string `json:"artifactImage,omitempty"`
+	// Deprecated: DSP V1 only, will be removed in the future.
+	CacheImage string `json:"cacheImage,omitempty"`
+	// Image used for internal artifact passing handling within Tekton taskruns. This field specifies the image used in the 'move-all-results-to-tekton-home' step.
+	// Deprecated: DSP V1 only, will be removed in the future.
+	MoveResultsImage string `json:"moveResultsImage,omitempty"`
+	// Deprecated: DSP V1 only, will be removed in the future.
+	ArtifactScriptConfigMap *ScriptConfigMap `json:"artifactScriptConfigMap,omitempty"`
+	// Inject the archive step script. Default: true
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	InjectDefaultScript bool `json:"injectDefaultScript"`
+	// Default: true
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	StripEOF bool `json:"stripEOF"`
+	// Default: "Cancelled" - Allowed Values: "Cancelled", "StoppedRunFinally", "CancelledRunFinally"
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:validation:Enum=Cancelled;StoppedRunFinally;CancelledRunFinally
+	// +kubebuilder:default:=Cancelled
+	TerminateStatus string `json:"terminateStatus,omitempty"`
+	// Default: true
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	TrackArtifacts bool `json:"trackArtifacts"`
+	// Default: 120
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=120
+	DBConfigConMaxLifetimeSec int `json:"dbConfigConMaxLifetimeSec,omitempty"`
+	// Default: true
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	CollectMetrics bool `json:"collectMetrics"`
+	// Default: true
+	// Deprecated: DSP V1 only, will be removed in the future.
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	AutoUpdatePipelineDefaultVersion bool `json:"autoUpdatePipelineDefaultVersion"`
+	// This is the path where the ca bundle will be mounted in the
+	// pipeline server and user executor pods
+	// +kubebuilder:validation:Optional
+	CABundleFileMountPath string `json:"caBundleFileMountPath"`
+	// This is the filename of the ca bundle that will be created in the
+	// pipeline server and user executor pods
+	// +kubebuilder:validation:Optional
+	CABundleFileName string `json:"caBundleFileName"`
 }
 
 type CABundle struct {
@@ -129,7 +152,7 @@ type CABundle struct {
 	ConfigMapKey string `json:"configMapKey"`
 }
 
-type ArtifactScriptConfigMap struct {
+type ScriptConfigMap struct {
 	Name string `json:"name,omitempty"`
 	Key  string `json:"key,omitempty"`
 }
@@ -178,6 +201,19 @@ type MlPipelineUI struct {
 type Database struct {
 	*MariaDB    `json:"mariaDB,omitempty"`
 	*ExternalDB `json:"externalDB,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// CustomExtraParams allow users to further customize the sql dsn parameters used by the Pipeline Server
+	// when opening a connection with the Database.
+	// ref: https://github.com/go-sql-driver/mysql?tab=readme-ov-file#dsn-data-source-name
+	//
+	// Value must be a JSON string. For example, to disable tls for Pipeline Server DB connection
+	// the user can provide a string: {"tls":"true"}
+	//
+	// If updating post DSPA deployment, then a manual restart of the pipeline server pod will be required
+	// so the new configmap may be consumed.
+	CustomExtraParams *string `json:"customExtraParams,omitempty"`
+
 	// Default: false
 	// +kubebuilder:default:=false
 	// +kubebuilder:validation:Optional
@@ -260,15 +296,19 @@ type MLMD struct {
 	// Enable DS Pipelines Operator management of MLMD. Setting Deploy to false disables operator reconciliation. Default: true
 	// +kubebuilder:default:=false
 	// +kubebuilder:validation:Optional
-	Deploy  bool `json:"deploy"`
-	*Envoy  `json:"envoy,omitempty"`
-	*GRPC   `json:"grpc,omitempty"`
+	Deploy bool `json:"deploy"`
+	*Envoy `json:"envoy,omitempty"`
+	*GRPC  `json:"grpc,omitempty"`
+	// Deprecated: DSP V1 only, will be removed in the future.
 	*Writer `json:"writer,omitempty"`
 }
 
 type Envoy struct {
 	Resources *ResourceRequirements `json:"resources,omitempty"`
 	Image     string                `json:"image,omitempty"`
+	// +kubebuilder:default:=true
+	// +kubebuilder:validation:Optional
+	DeployRoute bool `json:"deployRoute"`
 }
 
 type GRPC struct {
@@ -284,19 +324,15 @@ type Writer struct {
 	Image string `json:"image"`
 }
 
-type CRDViewer struct {
-	// +kubebuilder:default:=true
-	// +kubebuilder:validation:Optional
-	Deploy bool   `json:"deploy"`
-	Image  string `json:"image,omitempty"`
-}
-
 type WorkflowController struct {
 	// +kubebuilder:default:=true
 	// +kubebuilder:validation:Optional
 	Deploy        bool   `json:"deploy"`
 	Image         string `json:"image,omitempty"`
 	ArgoExecImage string `json:"argoExecImage,omitempty"`
+	CustomConfig  string `json:"customConfig,omitempty"`
+	// Specify custom Pod resource requirements for this component.
+	Resources *ResourceRequirements `json:"resources,omitempty"`
 }
 
 // ResourceRequirements structures compute resource requirements.
@@ -319,6 +355,7 @@ type ExternalStorage struct {
 	Scheme string `json:"scheme"`
 	// +kubebuilder:validation:Optional
 	Region string `json:"region"`
+	// Subpath where objects should be stored for this DSPA
 	// +kubebuilder:validation:Optional
 	BasePath            string `json:"basePath"`
 	*S3CredentialSecret `json:"s3CredentialsSecret"`
@@ -330,7 +367,7 @@ type ExternalStorage struct {
 
 type S3CredentialSecret struct {
 	// +kubebuilder:validation:Required
-	// Note: In V2 this value needs to be mlpipeline-minio-artifact
+	// The name of the Secret where the AccessKey and SecretKey are defined.
 	SecretName string `json:"secretName"`
 	// The "Keys" in the k8sSecret key/value pairs. Not to be confused with the values.
 	AccessKey string `json:"accessKey"`

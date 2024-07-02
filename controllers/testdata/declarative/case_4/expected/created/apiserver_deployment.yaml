@@ -113,6 +113,14 @@ spec:
           image: this-apiserver-image-from-cr-should-be-used:test4
           imagePullPolicy: Always
           name: ds-pipeline-api-server
+          command: ['/bin/apiserver']
+          volumeMounts:
+            - name: server-config
+              mountPath: /config/config.json
+              subPath: config.json
+          args:
+            - --config=/config
+            - -logtostderr=true
           ports:
             - containerPort: 8888
               name: http
@@ -203,4 +211,8 @@ spec:
           secret:
             secretName: ds-pipelines-proxy-tls-testdsp4
             defaultMode: 420
+        - name: server-config
+          configMap:
+            defaultMode: 420
+            name: ds-pipeline-server-config-testdsp4
       serviceAccountName: ds-pipeline-testdsp4

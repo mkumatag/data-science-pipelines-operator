@@ -18,6 +18,7 @@ limitations under the License.
 package controllers
 
 import (
+	v1 "github.com/openshift/api/route/v1"
 	"testing"
 
 	dspav1alpha1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1alpha1"
@@ -25,22 +26,19 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 )
 
-func TestDeployMLMD(t *testing.T) {
+func TestDeployMLMDV1(t *testing.T) {
 	testNamespace := "testnamespace"
 	testDSPAName := "testdspa"
 	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
 	expectedMLMDGRPCName := "ds-pipeline-metadata-grpc-testdspa"
 	expectedMLMDWriterName := "ds-pipeline-metadata-writer-testdspa"
 
 	// Construct DSPA Spec with MLMD Enabled
 	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
 		Spec: dspav1alpha1.DSPASpec{
-			APIServer: &dspav1alpha1.APIServer{
-				// TODO: This appears to be required which is out-of-spec (.Spec.APIServer should be fully defaultable),
-				// but test throws an nil pointer panic if it isn't provided.
-				// possibly due to test setup - Investigate.
-				ArchiveLogs: true,
-			},
+			DSPVersion: "v1",
+			APIServer:  &dspav1alpha1.APIServer{},
 			MLMD: &dspav1alpha1.MLMD{
 				Deploy: true,
 			},
@@ -75,6 +73,12 @@ func TestDeployMLMD(t *testing.T) {
 	assert.False(t, created)
 	assert.Nil(t, err)
 
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
 	// Ensure MLMD-GRPC resources doesn't yet exist
 	deployment = &appsv1.Deployment{}
 	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
@@ -97,6 +101,12 @@ func TestDeployMLMD(t *testing.T) {
 	assert.True(t, created)
 	assert.Nil(t, err)
 
+	// Ensure MLMD-Envoy route now exists
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
 	// Ensure MLMD-GRPC resources now exists
 	deployment = &appsv1.Deployment{}
 	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
@@ -110,22 +120,113 @@ func TestDeployMLMD(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestDontDeployMLMD(t *testing.T) {
+func TestDeployMLMDV2(t *testing.T) {
 	testNamespace := "testnamespace"
 	testDSPAName := "testdspa"
 	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
+	expectedMLMDGRPCName := "ds-pipeline-metadata-grpc-testdspa"
+	expectedMLMDWriterName := "ds-pipeline-metadata-writer-testdspa"
+
+	// Construct DSPA Spec with MLMD Enabled
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v2",
+			APIServer:  &dspav1alpha1.APIServer{},
+			MLMD: &dspav1alpha1.MLMD{
+				Deploy: true,
+			},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
+			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources doesn't yet exist
+	deployment := &appsv1.Deployment{}
+	created, err := reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-GRPC resources doesn't yet exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Writer resources doesn't yet exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Run test reconciliation
+	err = reconciler.ReconcileMLMD(dspa, params)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources now exists
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route now exists
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-GRPC resources now exists
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Writer resources still doesn't exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+}
+
+func TestDontDeployMLMDV1(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
 	expectedMLMDGRPCName := "ds-pipeline-metadata-grpc-testdspa"
 	expectedMLMDWriterName := "ds-pipeline-metadata-writer-testdspa"
 
 	// Construct DSPA Spec with MLMD Not Enabled
 	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
 		Spec: dspav1alpha1.DSPASpec{
-			APIServer: &dspav1alpha1.APIServer{
-				// TODO: This appears to be required which is out-of-spec (.Spec.APIServer should be fully defaultable),
-				// but test throws an nil pointer panic if it isn't provided.
-				// possibly due to test setup - Investigate.
-				ArchiveLogs: true,
-			},
+			DSPVersion: "v1",
+			APIServer:  &dspav1alpha1.APIServer{},
 			MLMD: &dspav1alpha1.MLMD{
 				Deploy: false,
 			},
@@ -160,6 +261,12 @@ func TestDontDeployMLMD(t *testing.T) {
 	assert.False(t, created)
 	assert.Nil(t, err)
 
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
 	// Ensure MLMD-GRPC resources doesn't yet exist
 	deployment = &appsv1.Deployment{}
 	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
@@ -182,6 +289,12 @@ func TestDontDeployMLMD(t *testing.T) {
 	assert.False(t, created)
 	assert.Nil(t, err)
 
+	// Ensure MLMD-Envoy route still doesn't exist
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
 	// Ensure MLMD-GRPC resources stil doesn't exist
 	deployment = &appsv1.Deployment{}
 	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
@@ -195,24 +308,242 @@ func TestDontDeployMLMD(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestDefaultDeployBehaviorMLMD(t *testing.T) {
+func TestDontDeployMLMDV2(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+
+	// Construct DSPA Spec with MLMD Not Enabled
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v2",
+			APIServer:  &dspav1alpha1.APIServer{},
+			MLMD: &dspav1alpha1.MLMD{
+				Deploy: false,
+			},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
+			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.EqualError(t, err, MlmdIsRequiredInV2Msg)
+}
+
+func TestDefaultDeployBehaviorMLMDV1(t *testing.T) {
 	testNamespace := "testnamespace"
 	testDSPAName := "testdspa"
 	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
 	expectedMLMDGRPCName := "ds-pipeline-metadata-grpc-testdspa"
 	expectedMLMDWriterName := "ds-pipeline-metadata-writer-testdspa"
 
 	// Construct DSPA Spec with MLMD Spec not defined
 	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
 		Spec: dspav1alpha1.DSPASpec{
-			APIServer: &dspav1alpha1.APIServer{
-				// TODO: This appears to be required which is out-of-spec (.Spec.APIServer should be fully defaultable),
-				// but test throws an nil pointer panic if it isn't provided.
-				// possibly due to test setup - Investigate.
-				ArchiveLogs: true,
+			DSPVersion: "v1",
+			APIServer:  &dspav1alpha1.APIServer{},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
 			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources doesn't yet exist
+	deployment := &appsv1.Deployment{}
+	created, err := reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-GRPC resources doesn't yet exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Writer resources doesn't yet exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Run test reconciliation
+	err = reconciler.ReconcileMLMD(dspa, params)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources still doesn't exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route still doesn't exist
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-GRPC resources still doesn't exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Writer resources still doesn't exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+}
+
+func TestDefaultDeployBehaviorMLMDV2(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
+	expectedMLMDGRPCName := "ds-pipeline-metadata-grpc-testdspa"
+	expectedMLMDWriterName := "ds-pipeline-metadata-writer-testdspa"
+
+	// Construct DSPA Spec with MLMD Spec not defined
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v2",
+			APIServer:  &dspav1alpha1.APIServer{},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
+			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources doesn't yet exist
+	deployment := &appsv1.Deployment{}
+	created, err := reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-GRPC resources doesn't yet exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Writer resources doesn't yet exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Run test reconciliation
+	err = reconciler.ReconcileMLMD(dspa, params)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources now exists
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route now exists
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-GRPC resources now exists
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Writer resources still doesn't exist
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+}
+
+func TestDeployEnvoyRouteV1(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
+
+	// Construct DSPA Spec with MLMD Enabled
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v1",
+			APIServer:  &dspav1alpha1.APIServer{},
 			MLMD: &dspav1alpha1.MLMD{
 				Deploy: true,
+				Envoy: &dspav1alpha1.Envoy{
+					DeployRoute: true,
+				},
 			},
 			Database: &dspav1alpha1.Database{
 				DisableHealthCheck: false,
@@ -245,15 +576,9 @@ func TestDefaultDeployBehaviorMLMD(t *testing.T) {
 	assert.False(t, created)
 	assert.Nil(t, err)
 
-	// Ensure MLMD-GRPC resources doesn't yet exist
-	deployment = &appsv1.Deployment{}
-	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
-	assert.False(t, created)
-	assert.Nil(t, err)
-
-	// Ensure MLMD-Writer resources doesn't yet exist
-	deployment = &appsv1.Deployment{}
-	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
 	assert.False(t, created)
 	assert.Nil(t, err)
 
@@ -261,21 +586,228 @@ func TestDefaultDeployBehaviorMLMD(t *testing.T) {
 	err = reconciler.ReconcileMLMD(dspa, params)
 	assert.Nil(t, err)
 
-	// Ensure MLMD-Envoy resources still doesn't exist
+	// Ensure MLMD-Envoy resources now exists
 	deployment = &appsv1.Deployment{}
 	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
 	assert.True(t, created)
 	assert.Nil(t, err)
 
-	// Ensure MLMD-GRPC resources still doesn't exist
+	// Ensure MLMD-Envoy route now exists
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+}
+
+func TestDeployEnvoyRouteV2(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
+
+	// Construct DSPA Spec with MLMD Enabled
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v2",
+			APIServer:  &dspav1alpha1.APIServer{},
+			MLMD: &dspav1alpha1.MLMD{
+				Deploy: true,
+				Envoy: &dspav1alpha1.Envoy{
+					DeployRoute: true,
+				},
+			},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
+			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources doesn't yet exist
+	deployment := &appsv1.Deployment{}
+	created, err := reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Run test reconciliation
+	err = reconciler.ReconcileMLMD(dspa, params)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources now exists
 	deployment = &appsv1.Deployment{}
-	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDGRPCName, testNamespace)
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
 	assert.True(t, created)
 	assert.Nil(t, err)
 
-	// Ensure MLMD-Writer resources still doesn't exist
-	deployment = &appsv1.Deployment{}
-	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDWriterName, testNamespace)
+	// Ensure MLMD-Envoy route now exists
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
 	assert.True(t, created)
+	assert.Nil(t, err)
+}
+
+func TestDontDeployEnvoyRouteV1(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
+
+	// Construct DSPA Spec with MLMD Enabled
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v1",
+			APIServer:  &dspav1alpha1.APIServer{},
+			MLMD: &dspav1alpha1.MLMD{
+				Deploy: true,
+				Envoy: &dspav1alpha1.Envoy{
+					DeployRoute: false,
+				},
+			},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
+			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources doesn't yet exist
+	deployment := &appsv1.Deployment{}
+	created, err := reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Run test reconciliation
+	err = reconciler.ReconcileMLMD(dspa, params)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources now exists
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route still doesn't exist
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+}
+
+func TestDontDeployEnvoyRouteV2(t *testing.T) {
+	testNamespace := "testnamespace"
+	testDSPAName := "testdspa"
+	expectedMLMDEnvoyName := "ds-pipeline-metadata-envoy-testdspa"
+	expectedMLMDEnvoyRouteName := "ds-pipeline-md-testdspa"
+
+	// Construct DSPA Spec with MLMD Enabled
+	dspa := &dspav1alpha1.DataSciencePipelinesApplication{
+		Spec: dspav1alpha1.DSPASpec{
+			DSPVersion: "v2",
+			APIServer:  &dspav1alpha1.APIServer{},
+			MLMD: &dspav1alpha1.MLMD{
+				Deploy: true,
+				Envoy: &dspav1alpha1.Envoy{
+					DeployRoute: false,
+				},
+			},
+			Database: &dspav1alpha1.Database{
+				DisableHealthCheck: false,
+				MariaDB: &dspav1alpha1.MariaDB{
+					Deploy: true,
+				},
+			},
+			ObjectStorage: &dspav1alpha1.ObjectStorage{
+				DisableHealthCheck: false,
+				Minio: &dspav1alpha1.Minio{
+					Deploy: false,
+					Image:  "someimage",
+				},
+			},
+		},
+	}
+
+	// Enrich DSPA with name+namespace
+	dspa.Namespace = testNamespace
+	dspa.Name = testDSPAName
+
+	// Create Context, Fake Controller and Params
+	ctx, params, reconciler := CreateNewTestObjects()
+	err := params.ExtractParams(ctx, dspa, reconciler.Client, reconciler.Log)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources doesn't yet exist
+	deployment := &appsv1.Deployment{}
+	created, err := reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route doesn't yet exist
+	route := &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
+	assert.Nil(t, err)
+
+	// Run test reconciliation
+	err = reconciler.ReconcileMLMD(dspa, params)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy resources now exists
+	deployment = &appsv1.Deployment{}
+	created, err = reconciler.IsResourceCreated(ctx, deployment, expectedMLMDEnvoyName, testNamespace)
+	assert.True(t, created)
+	assert.Nil(t, err)
+
+	// Ensure MLMD-Envoy route still doesn't exist
+	route = &v1.Route{}
+	created, err = reconciler.IsResourceCreated(ctx, route, expectedMLMDEnvoyRouteName, testNamespace)
+	assert.False(t, created)
 	assert.Nil(t, err)
 }

@@ -113,6 +113,10 @@ spec:
           image: api-server:test3
           imagePullPolicy: Always
           name: ds-pipeline-api-server
+          command: ['/bin/apiserver']
+          args:
+            - --config=/config
+            - -logtostderr=true
           ports:
             - containerPort: 8888
               name: http
@@ -144,6 +148,10 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 5
             timeoutSeconds: 2
+          volumeMounts:
+            - name: server-config
+              mountPath: /config/config.json
+              subPath: config.json
           resources:
             requests:
               cpu: 250m
@@ -202,5 +210,9 @@ spec:
         - name: proxy-tls
           secret:
             secretName: ds-pipelines-proxy-tls-testdsp3
+            defaultMode: 420
+        - name: server-config
+          configMap:
+            name: ds-pipeline-server-config-testdsp3
             defaultMode: 420
       serviceAccountName: ds-pipeline-testdsp3

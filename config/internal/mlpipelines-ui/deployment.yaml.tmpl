@@ -49,7 +49,7 @@ spec:
             - name: ML_PIPELINE_SERVICE_PORT
               value: '8888'
             - name: METADATA_ENVOY_SERVICE_SERVICE_HOST
-              value: ds-pipeline-metadata-envoy-{{.Name}}
+              value: ds-pipeline-md-{{.Name}}
             - name: METADATA_ENVOY_SERVICE_SERVICE_PORT
               value: "9090"
             - name: AWS_ACCESS_KEY_ID
@@ -70,33 +70,27 @@ spec:
             - name: AWS_SSL
               value: "false"
             {{ end }}
+            - name: DISABLE_GKE_METADATA
+              value: 'true'
           image: {{.MlPipelineUI.Image}}
           imagePullPolicy: IfNotPresent
           livenessProbe:
-            exec:
-              command:
-                - wget
-                - -q
-                - -S
-                - -O
-                - '-'
-                - http://localhost:3000/apis/v1beta1/healthz
-            initialDelaySeconds: 3
+            httpGet:
+              port: 3000
+              path: /apis/v1beta1/healthz
+              scheme: HTTP
+            initialDelaySeconds: 30
             periodSeconds: 5
             timeoutSeconds: 2
           name: ds-pipeline-ui
           ports:
             - containerPort: 3000
           readinessProbe:
-            exec:
-              command:
-                - wget
-                - -q
-                - -S
-                - -O
-                - '-'
-                - http://localhost:3000/apis/v1beta1/healthz
-            initialDelaySeconds: 3
+            httpGet:
+              port: 3000
+              path: /apis/v1beta1/healthz
+              scheme: HTTP
+            initialDelaySeconds: 30
             periodSeconds: 5
             timeoutSeconds: 2
           resources:

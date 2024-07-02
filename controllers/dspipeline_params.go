@@ -17,11 +17,17 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
+	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-logr/logr"
 	mf "github.com/manifestival/manifestival"
@@ -36,17 +42,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const MlmdIsRequiredInV2Msg = "MLMD explicitly disabled in DSPA, but is a required component for V2 Pipelines"
+
 type DSPAParams struct {
+	IncludeOwnerReference                bool
+	UID                                  types.UID
 	Name                                 string
+	APIVersion                           string
+	Kind                                 string
 	Namespace                            string
 	Owner                                mf.Owner
 	DSPVersion                           string
 	APIServer                            *dspa.APIServer
-	APIServerPiplinesCABundleMountPath   string
-	PiplinesCABundleMountPath            string
 	APIServerDefaultResourceName         string
 	APIServerServiceName                 string
-	APICustomPemCerts                    []byte
 	OAuthProxy                           string
 	ScheduledWorkflow                    *dspa.ScheduledWorkflow
 	ScheduledWorkflowDefaultResourceName string
@@ -56,10 +65,27 @@ type DSPAParams struct {
 	MariaDB                              *dspa.MariaDB
 	Minio                                *dspa.Minio
 	MLMD                                 *dspa.MLMD
-	CRDViewer                            *dspa.CRDViewer
 	WorkflowController                   *dspa.WorkflowController
 	DBConnection
 	ObjectStorageConnection
+
+	// TLS
+	// The CA bundle path used by API server
+	CustomCABundleRootMountPath string
+	// This path is used by API server to also look
+	// for CustomCABundleRootMountPath when
+	// verifying certs
+	CustomSSLCertDir *string
+	// The CA bundle path found in the pipeline pods
+	PiplinesCABundleMountPath string
+	// Collects all certs from user & global certs
+	APICustomPemCerts [][]byte
+	// Source of truth for the DSP cert configmap details
+	// If this is defined, then we assume we have additional certs
+	// we need to leverage for tls connections within dsp apiserver
+	// pipeline pods
+	CustomCABundle *dspa.CABundle
+	DSPONamespace  string
 }
 
 type DBConnection struct {
@@ -69,8 +95,8 @@ type DBConnection struct {
 	DBName            string
 	CredentialsSecret *dspa.SecretKeyValue
 	Password          string
+	ExtraParams       string
 }
-
 type ObjectStorageConnection struct {
 	Bucket            string
 	CredentialsSecret *dspa.S3CredentialSecret
@@ -123,7 +149,7 @@ func (p *DSPAParams) UsingExternalDB(dsp *dspa.DataSciencePipelinesApplication) 
 	return false
 }
 
-// StorageHealthCheckDisabled will return the value if the Database has disableHealthCheck specified in the CR, otherwise false.
+// DatabaseHealthCheckDisabled will return the value if the Database has disableHealthCheck specified in the CR, otherwise false.
 func (p *DSPAParams) DatabaseHealthCheckDisabled(dsp *dspa.DataSciencePipelinesApplication) bool {
 	if dsp.Spec.Database != nil {
 		return dsp.Spec.Database.DisableHealthCheck
@@ -239,6 +265,18 @@ func (p *DSPAParams) SetupDBParams(ctx context.Context, dsp *dspa.DataSciencePip
 		p.DBConnection.DBName = dsp.Spec.Database.ExternalDB.DBName
 		p.DBConnection.CredentialsSecret = dsp.Spec.Database.ExternalDB.PasswordSecret
 
+		// Assume default external connection is tls enabled
+		// user can override this via CustomExtraParams field
+		tlsParams := config.DBExtraParams{
+			"tls": "true",
+		}
+		dbExtraParams, err := config.GetDefaultDBExtraParams(tlsParams, log)
+		if err != nil {
+			log.Error(err, "Unexpected error encountered while retrieving DBExtraparams")
+			return err
+		}
+		p.DBConnection.ExtraParams = dbExtraParams
+
 		// Retreive DB Password from specified secret.  Ignore error if the secret simply doesn't exist (will be created later)
 		password, err := p.RetrieveSecret(ctx, client, p.DBConnection.CredentialsSecret.Name, p.DBConnection.CredentialsSecret.Key, log)
 		if err != nil && !apierrs.IsNotFound(err) {
@@ -277,6 +315,16 @@ func (p *DSPAParams) SetupDBParams(ctx context.Context, dsp *dspa.DataSciencePip
 		p.DBConnection.Port = config.MariaDBHostPort
 		p.DBConnection.Username = p.MariaDB.Username
 		p.DBConnection.DBName = p.MariaDB.DBName
+		// By Default OOB mariadb is not tls enabled
+		tlsParams := config.DBExtraParams{
+			"tls": "false",
+		}
+		dbExtraParams, err := config.GetDefaultDBExtraParams(tlsParams, log)
+		if err != nil {
+			log.Error(err, "Unexpected error encountered while retrieving DBExtraparams")
+			return err
+		}
+		p.DBConnection.ExtraParams = dbExtraParams
 
 		// If custom DB Secret provided, use its values.  Otherwise generate a default
 		if p.MariaDB.PasswordSecret != nil {
@@ -293,6 +341,19 @@ func (p *DSPAParams) SetupDBParams(ctx context.Context, dsp *dspa.DataSciencePip
 		}
 		p.DBConnection.Password = dbPassword
 	}
+
+	// User specified custom Extra parameters will always take precedence
+	if dsp.Spec.Database.CustomExtraParams != nil {
+		// Validate CustomExtraParams is a valid params json
+		var validParamsJson map[string]string
+		err := json.Unmarshal([]byte(*dsp.Spec.Database.CustomExtraParams), &validParamsJson)
+		if err != nil {
+			log.Info(fmt.Sprintf("Encountered error when validating CustomExtraParams field in DSPA, please ensure the params are well-formed: Error: %v", err))
+			return err
+		}
+		p.DBConnection.ExtraParams = *dsp.Spec.Database.CustomExtraParams
+	}
+
 	if p.DBConnection.Password == "" {
 		return fmt.Errorf(fmt.Sprintf("DB Password from secret [%s] for key [%s] was not successfully retrieved, "+
 			"ensure that the secret with this key exist.", p.DBConnection.CredentialsSecret.Name, p.DBConnection.CredentialsSecret.Key))
@@ -383,11 +444,6 @@ func (p *DSPAParams) SetupObjectParams(ctx context.Context, dsp *dspa.DataScienc
 			}
 		}
 
-		// TODO: Remove once v2launcher minio secret is parameterized during artifact passing
-		if p.UsingV2Pipelines(dsp) {
-			p.ObjectStorageConnection.CredentialsSecret.SecretName = "mlpipeline-minio-artifact"
-		}
-
 		accessKey, secretKey, err := p.RetrieveOrCreateObjectStoreSecret(ctx, client, p.ObjectStorageConnection.CredentialsSecret, log)
 		if err != nil {
 			return err
@@ -436,7 +492,7 @@ func (p *DSPAParams) SetupObjectParams(ctx context.Context, dsp *dspa.DataScienc
 
 }
 
-func (p *DSPAParams) SetupMLMD(ctx context.Context, dsp *dspa.DataSciencePipelinesApplication, client client.Client, log logr.Logger) error {
+func (p *DSPAParams) SetupMLMD(dsp *dspa.DataSciencePipelinesApplication, log logr.Logger) error {
 	if p.UsingV2Pipelines(dsp) {
 		if p.MLMD == nil {
 			log.Info("MLMD not specified, but is a required component for V2 Pipelines. Including MLMD with default specs.")
@@ -444,7 +500,7 @@ func (p *DSPAParams) SetupMLMD(ctx context.Context, dsp *dspa.DataSciencePipelin
 				Deploy: true,
 			}
 		} else if !p.MLMD.Deploy {
-			return fmt.Errorf("MLMD explicitly disabled in DSPA, but is a required component for V2 Pipelines")
+			return fmt.Errorf(MlmdIsRequiredInV2Msg)
 		}
 	}
 	if p.MLMD != nil {
@@ -490,6 +546,17 @@ func (p *DSPAParams) SetupMLMD(ctx context.Context, dsp *dspa.DataSciencePipelin
 	return nil
 }
 
+func (p *DSPAParams) SetupOwner(dsp *dspa.DataSciencePipelinesApplication) {
+	p.IncludeOwnerReference = config.GetBoolConfigWithDefault(config.ApiServerIncludeOwnerReferenceConfigName, config.DefaultApiServerIncludeOwnerReferenceConfigName)
+
+	if p.IncludeOwnerReference {
+		p.UID = dsp.UID
+		p.Name = dsp.Name
+		p.APIVersion = dsp.APIVersion
+		p.Kind = dsp.Kind
+	}
+}
+
 func setStringDefault(defaultValue string, value *string) {
 	if *value == "" {
 		*value = defaultValue
@@ -502,9 +569,10 @@ func setResourcesDefault(defaultValue dspa.ResourceRequirements, value **dspa.Re
 	}
 }
 
-func (p *DSPAParams) ExtractParams(ctx context.Context, dsp *dspa.DataSciencePipelinesApplication, client client.Client, log logr.Logger) error {
+func (p *DSPAParams) ExtractParams(ctx context.Context, dsp *dspa.DataSciencePipelinesApplication, client client.Client, loggr logr.Logger) error {
 	p.Name = dsp.Name
 	p.Namespace = dsp.Namespace
+	p.DSPONamespace = os.Getenv("DSPO_NAMESPACE")
 	p.DSPVersion = dsp.Spec.DSPVersion
 	p.Owner = dsp
 	p.APIServer = dsp.Spec.APIServer.DeepCopy()
@@ -519,8 +587,11 @@ func (p *DSPAParams) ExtractParams(ctx context.Context, dsp *dspa.DataSciencePip
 	p.Minio = dsp.Spec.ObjectStorage.Minio.DeepCopy()
 	p.OAuthProxy = config.GetStringConfigWithDefault(config.OAuthProxyImagePath, config.DefaultImageValue)
 	p.MLMD = dsp.Spec.MLMD.DeepCopy()
-	p.APIServerPiplinesCABundleMountPath = config.APIServerPiplinesCABundleMountPath
-	p.PiplinesCABundleMountPath = config.PiplinesCABundleMountPath
+	p.CustomCABundleRootMountPath = config.CustomCABundleRootMountPath
+	p.PiplinesCABundleMountPath = config.GetCABundleFileMountPath()
+	dspTrustedCAConfigMapKey := config.CustomDSPTrustedCAConfigMapKey
+
+	log := loggr.WithValues("namespace", p.Namespace).WithValues("dspa_name", p.Name)
 
 	if p.APIServer != nil {
 		APIServerImagePath := p.GetImageForComponent(dsp, config.APIServerImagePath, config.APIServerImagePathV2Argo, config.APIServerImagePathV2Tekton)
@@ -543,26 +614,156 @@ func (p *DSPAParams) ExtractParams(ctx context.Context, dsp *dspa.DataSciencePip
 		setStringDefault(moveResultsImageFromConfig, &p.APIServer.MoveResultsImage)
 		setStringDefault(argoLauncherImageFromConfig, &p.APIServer.ArgoLauncherImage)
 		setStringDefault(argoDriverImageFromConfig, &p.APIServer.ArgoDriverImage)
-
 		setResourcesDefault(config.APIServerResourceRequirements, &p.APIServer.Resources)
 
 		if p.APIServer.ArtifactScriptConfigMap == nil {
-			p.APIServer.ArtifactScriptConfigMap = &dspa.ArtifactScriptConfigMap{
+			p.APIServer.ArtifactScriptConfigMap = &dspa.ScriptConfigMap{
 				Name: config.ArtifactScriptConfigMapNamePrefix + dsp.Name,
 				Key:  config.ArtifactScriptConfigMapKey,
 			}
 		}
 
-		// If a Custom CA Bundle is specified for injection into DSP API Server Pod
-		// then retrieve the bundle to utilize during storage health check
-		if p.APIServer.CABundle != nil {
-			cfgKey, cfgName := p.APIServer.CABundle.ConfigMapKey, p.APIServer.CABundle.ConfigMapName
-			err, val := util.GetConfigMapValue(ctx, cfgKey, cfgName, p.Namespace, client, log)
-			if err != nil {
-				log.Error(err, "Encountered error when attempting to retrieve CABundle from configmap")
+		if p.APIServer.CustomServerConfig == nil {
+			p.APIServer.CustomServerConfig = &dspa.ScriptConfigMap{
+				Name: config.CustomServerConfigMapNamePrefix + dsp.Name,
+				Key:  config.CustomServerConfigMapNameKey,
+			}
+		}
+
+		// Track whether the "ca-bundle.crt" configmap key from odh-trusted-ca bundle
+		// was found, this will be used to decide whether we need to account for this
+		// ourselves later or not.
+		odhTrustedCABundleAdded := false
+
+		// Check for cert bundle provided by the platform instead of by the DSPA user
+		// If it exists, include this cert for tls verifications
+		globalCABundleCFGMapName := config.GlobalODHCaBundleConfigMapName
+
+		odhTrustedCABundleConfigMap, err := util.GetConfigMap(ctx, globalCABundleCFGMapName, p.Namespace, client)
+		if err != nil {
+			// If the global cert configmap is not available, that is OK
+			if !apierrs.IsNotFound(err) {
+				log.Info(fmt.Sprintf("Encountered error when attempting to fetch ConfigMap: [%s], Error: %v", globalCABundleCFGMapName, err))
 				return err
 			}
-			p.APICustomPemCerts = []byte(val)
+		} else {
+			// Found a cert provided by odh-operator. Consume it.
+			globalCerts := util.GetConfigMapValues(odhTrustedCABundleConfigMap)
+			log.Info(fmt.Sprintf("Found global CA Bundle %s present in this namespace %s, this bundle will be included in external tls connections.", config.GlobalODHCaBundleConfigMapName, p.Namespace))
+			// "odh-trusted-ca-bundle" can have fields: "odh-ca-bundle.crt" and "ca-bundle.crt", we need to utilize both
+			for _, val := range globalCerts {
+				// If the ca-bundle field is empty, ignore it
+				if val != "" {
+					p.APICustomPemCerts = append(p.APICustomPemCerts, []byte(val))
+				}
+			}
+			// If odh-trusted-ca-bundle is created via network operator then this is always going to be present
+			// however if a user creates this, they may accidentally leave this out, so we need to account for this
+			_, ok := odhTrustedCABundleConfigMap.Data[config.GlobalODHCaBundleConfigMapSystemBundleKey]
+			if ok {
+				odhTrustedCABundleAdded = true
+			}
+		}
+
+		// If user provided a CA bundle, include this in tls verification
+		if p.APIServer.CABundle != nil {
+			dspaCaBundleCfgKey, dspaCaBundleCfgName := p.APIServer.CABundle.ConfigMapKey, p.APIServer.CABundle.ConfigMapName
+			dspaCAConfigMap, dspaCACfgErr := util.GetConfigMap(ctx, dspaCaBundleCfgName, p.Namespace, client)
+			if dspaCACfgErr != nil && apierrs.IsNotFound(dspaCACfgErr) {
+				log.Info(fmt.Sprintf("ConfigMap [%s] was not found in namespace [%s]", dspaCAConfigMap.Name, p.Namespace))
+				return dspaCACfgErr
+			} else if dspaCACfgErr != nil {
+				log.Info(fmt.Sprintf("Encountered error when attempting to fetch ConfigMap: [%s], Error: %v", dspaCaBundleCfgName, dspaCACfgErr))
+				return dspaCACfgErr
+			}
+			dspaProvidedCABundle := util.GetConfigMapValue(dspaCaBundleCfgKey, dspaCAConfigMap)
+			// If the ca-bundle field is empty, ignore it
+			if dspaProvidedCABundle != "" {
+				p.APICustomPemCerts = append(p.APICustomPemCerts, []byte(dspaProvidedCABundle))
+			}
+		}
+
+		if p.APIServer.CABundleFileMountPath != "" {
+			p.CustomCABundleRootMountPath = p.APIServer.CABundleFileMountPath
+		}
+		if p.APIServer.CABundleFileName != "" {
+			dspTrustedCAConfigMapKey = p.APIServer.CABundleFileName
+		}
+		p.PiplinesCABundleMountPath = fmt.Sprintf("%s/%s", p.CustomCABundleRootMountPath, dspTrustedCAConfigMapKey)
+
+		// There are situations where global & user provided certs, or a provided ca trust configmap(s) have various trust bundles
+		// (for example in the case of "odh-trusted-ca-bundle") there is "odh-ca-bundle.crt" and "ca-bundle.crt".
+		// We create a separate configmap and concatenate all the certs into a single bundle, because passing a
+		// full path into the pipeline doesn't seem to work with aws cli used for artifact passing
+		// Ref: https://github.com/aws/aws-cli/issues/3425#issuecomment-402289636
+
+		// If user or global CABundle has been provided
+		// 1) create the dsp-trusted-ca configmap
+		// 2) populate CustomCABundle SOT var for pipeline pods and artifact script to utilize during templating
+		// 3) set ssl_cert_dir for api server
+		if len(p.APICustomPemCerts) > 0 {
+
+			// We need to ensure system certs are always part of this new configmap
+			// We can either source this from odh-trusted-ca-bundle cfgmap if provided,
+			// or fetch one from "config-trusted-cabundle" configmap, which is always present in an ocp ns
+			if !odhTrustedCABundleAdded {
+				certs, sysCertsErr := util.GetSystemCerts()
+				if sysCertsErr != nil {
+					return sysCertsErr
+				}
+
+				if len(certs) != 0 {
+					p.APICustomPemCerts = append(p.APICustomPemCerts, certs)
+				}
+			}
+
+			p.CustomCABundle = &dspa.CABundle{
+				ConfigMapKey:  dspTrustedCAConfigMapKey,
+				ConfigMapName: fmt.Sprintf("%s-%s", config.CustomDSPTrustedCAConfigMapNamePrefix, p.Name),
+			}
+
+			// Combine certs into a single configmap field
+			customCABundleCert := &v1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      p.CustomCABundle.ConfigMapName,
+					Namespace: p.Namespace,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         dsp.APIVersion,
+							Kind:               dsp.Kind,
+							Name:               dsp.Name,
+							UID:                dsp.UID,
+							Controller:         util.BoolPointer(true),
+							BlockOwnerDeletion: util.BoolPointer(true),
+						},
+					},
+				},
+
+				Data: map[string]string{
+					p.CustomCABundle.ConfigMapKey: string(bytes.Join(p.APICustomPemCerts, []byte{})),
+				},
+			}
+
+			err := client.Create(ctx, customCABundleCert)
+			if apierrs.IsAlreadyExists(err) {
+				err := client.Update(ctx, customCABundleCert)
+				if err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+
+			// We need to update the default SSL_CERT_DIR to include
+			// dsp custom cert path, used by DSP Api Server
+			var certDirectories = []string{
+				p.CustomCABundleRootMountPath,
+				"/etc/ssl/certs",     // SLES10/SLES11, https://golang.org/issue/12139
+				"/etc/pki/tls/certs", // Fedora/RHEL
+			}
+			// SSL_CERT_DIR accepts a colon separated list of directories
+			sslCertDir := strings.Join(certDirectories, ":")
+			p.CustomSSLCertDir = &sslCertDir
 		}
 	}
 
@@ -603,9 +804,10 @@ func (p *DSPAParams) ExtractParams(ctx context.Context, dsp *dspa.DataSciencePip
 		argoExecImageFromConfig := config.GetStringConfigWithDefault(config.ArgoExecImagePath, config.DefaultImageValue)
 		setStringDefault(argoWorkflowImageFromConfig, &p.WorkflowController.Image)
 		setStringDefault(argoExecImageFromConfig, &p.WorkflowController.ArgoExecImage)
+		setResourcesDefault(config.WorkflowControllerResourceRequirements, &p.WorkflowController.Resources)
 	}
 
-	err := p.SetupMLMD(ctx, dsp, client, log)
+	err := p.SetupMLMD(dsp, log)
 	if err != nil {
 		return err
 	}
@@ -619,6 +821,8 @@ func (p *DSPAParams) ExtractParams(ctx context.Context, dsp *dspa.DataSciencePip
 	if err != nil {
 		return err
 	}
+
+	p.SetupOwner(dsp)
 
 	return nil
 }

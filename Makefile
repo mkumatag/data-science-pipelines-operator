@@ -75,6 +75,8 @@ endif
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 .PHONY: all
 all: build
 
@@ -123,12 +125,12 @@ unittest: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: functest
 functest: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... --tags=test_functional -coverprofile cover.out
+	export SSL_CERT_FILE=${ROOT_DIR}/controllers/testdata/tls/ca-bundle.crt && KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... --tags=test_functional -coverprofile cover.out
 
 .PHONY: integrationtest
 integrationtest: ## Run integration tests
 	cd tests && \
-	go run github.com/onsi/ginkgo/v2/ginkgo --tags=test_integration -- -kubeconfig=${KUBECONFIGPATH} -k8sApiServerHost=${K8SAPISERVERHOST} -DSPANamespace=${DSPANAMESPACE} -DSPAPath=${DSPAPATH} -ginkgo.v
+	go test ./... --tags=test_integration -v -kubeconfig=${KUBECONFIGPATH} -k8sApiServerHost=${K8SAPISERVERHOST} -DSPANamespace=${DSPANAMESPACE} -DSPAPath=${DSPAPATH}
 
 ##@ Build
 
@@ -169,6 +171,11 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 		&& $(KUSTOMIZE) edit set namespace ${OPERATOR_NS}
 	$(KUSTOMIZE) build config/overlays/make-deploy | kubectl apply -f -
 
+.PHONY: undeploy
+undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	cd config/overlays/make-deploy && $(KUSTOMIZE) edit set namespace ${OPERATOR_NS}
+	$(KUSTOMIZE) build config/overlays/make-deploy | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
 .PHONY: deploy-kind
 deploy-kind:
 	cd config/overlays/kind-tests \
@@ -176,39 +183,11 @@ deploy-kind:
 		&& kustomize edit set namespace ${OPERATOR_NS}
 	kustomize build config/overlays/kind-tests | kubectl apply -f -
 
-.PHONY: undeploy
-undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	cd config/overlays/make-deploy && $(KUSTOMIZE) edit set namespace ${OPERATOR_NS}
-	$(KUSTOMIZE) build config/overlays/make-deploy | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
-
-.PHONY: argodeploy
-argodeploy: manifests kustomize
-	cd config/overlays/make-argodeploy \
-		&& $(KUSTOMIZE) edit set namespace ${ARGO_NS}
-	$(KUSTOMIZE) build config/overlays/make-argodeploy | kubectl apply -f -
-
-.PHONY: argoundeploy
-argoundeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	cd config/overlays/make-argodeploy \
-	    && $(KUSTOMIZE) edit set namespace ${ARGO_NS}
-	$(KUSTOMIZE) build config/overlays/make-argodeploy | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
-
 .PHONY: undeploy-kind
 undeploy-kind: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	cd config/overlays/kind-tests \
 		&& kustomize edit set namespace ${OPERATOR_NS}
 	kustomize build config/overlays/kind-tests | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
-
-.PHONY: deployODH
-deployODH: manifests kustomize
-	cd config/overlays/make-deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace ${OPERATOR_NS}
-	$(KUSTOMIZE) build config/overlays/odh | kubectl apply -f -
-
-.PHONY: undeployODH
-undeployODH:
-	cd config/overlays/odh && $(KUSTOMIZE) edit set namespace ${OPERATOR_NS}
-	$(KUSTOMIZE) build config/overlays/odh | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
-
 
 ##@ Build Dependencies
 
@@ -246,7 +225,7 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.16
 
 .PHONY: bundle
 bundle: manifests kustomize ## Generate bundle manifests and metadata, then validate generated files.

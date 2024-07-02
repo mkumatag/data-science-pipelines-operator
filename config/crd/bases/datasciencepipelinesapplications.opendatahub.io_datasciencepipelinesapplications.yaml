@@ -42,19 +42,25 @@ spec:
                 properties:
                   applyTektonCustomResource:
                     default: true
-                    description: 'Default: true'
+                    description: 'Default: true Deprecated: DSP V1 only, will be removed
+                      in the future.'
                     type: boolean
                   archiveLogs:
                     default: false
-                    description: 'Default: false'
+                    description: 'Default: false Deprecated: DSP V1 only, will be
+                      removed in the future.'
                     type: boolean
                   argoDriverImage:
                     type: string
                   argoLauncherImage:
                     type: string
                   artifactImage:
+                    description: 'Deprecated: DSP V1 only, will be removed in the
+                      future.'
                     type: string
                   artifactScriptConfigMap:
+                    description: 'Deprecated: DSP V1 only, will be removed in the
+                      future.'
                     properties:
                       key:
                         type: string
@@ -63,7 +69,8 @@ spec:
                     type: object
                   autoUpdatePipelineDefaultVersion:
                     default: true
-                    description: 'Default: true'
+                    description: 'Default: true Deprecated: DSP V1 only, will be removed
+                      in the future.'
                     type: boolean
                   cABundle:
                     description: If the Object store/DB is behind a TLS secured connection
@@ -82,15 +89,36 @@ spec:
                     - configMapKey
                     - configMapName
                     type: object
+                  caBundleFileMountPath:
+                    description: This is the path where the ca bundle will be mounted
+                      in the pipeline server and user executor pods
+                    type: string
+                  caBundleFileName:
+                    description: This is the filename of the ca bundle that will be
+                      created in the pipeline server and user executor pods
+                    type: string
                   cacheImage:
+                    description: 'Deprecated: DSP V1 only, will be removed in the
+                      future.'
                     type: string
                   collectMetrics:
                     default: true
-                    description: 'Default: true'
+                    description: 'Default: true Deprecated: DSP V1 only, will be removed
+                      in the future.'
                     type: boolean
+                  customServerConfigMap:
+                    description: CustomServerConfig is a custom config file that you
+                      can provide for the api server to use instead.
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    type: object
                   dbConfigConMaxLifetimeSec:
                     default: 120
-                    description: 'Default: 120'
+                    description: 'Default: 120 Deprecated: DSP V1 only, will be removed
+                      in the future.'
                     type: integer
                   deploy:
                     default: true
@@ -104,7 +132,7 @@ spec:
                       Default: true'
                     type: boolean
                   enableSamplePipeline:
-                    default: true
+                    default: false
                     description: 'Include sample pipelines with the deployment of
                       this DSP API Server. Default: true'
                     type: boolean
@@ -113,12 +141,14 @@ spec:
                     type: string
                   injectDefaultScript:
                     default: true
-                    description: 'Inject the archive step script. Default: true'
+                    description: 'Inject the archive step script. Default: true Deprecated:
+                      DSP V1 only, will be removed in the future.'
                     type: boolean
                   moveResultsImage:
-                    description: Image used for internal artifact passing handling
+                    description: 'Image used for internal artifact passing handling
                       within Tekton taskruns. This field specifies the image used
-                      in the 'move-all-results-to-tekton-home' step.
+                      in the ''move-all-results-to-tekton-home'' step. Deprecated:
+                      DSP V1 only, will be removed in the future.'
                     type: string
                   resources:
                     description: Specify custom Pod resource requirements for this
@@ -157,12 +187,14 @@ spec:
                     type: object
                   stripEOF:
                     default: true
-                    description: 'Default: true'
+                    description: 'Default: true Deprecated: DSP V1 only, will be removed
+                      in the future.'
                     type: boolean
                   terminateStatus:
                     default: Cancelled
                     description: 'Default: "Cancelled" - Allowed Values: "Cancelled",
-                      "StoppedRunFinally", "CancelledRunFinally"'
+                      "StoppedRunFinally", "CancelledRunFinally" Deprecated: DSP V1
+                      only, will be removed in the future.'
                     enum:
                     - Cancelled
                     - StoppedRunFinally
@@ -170,18 +202,9 @@ spec:
                     type: string
                   trackArtifacts:
                     default: true
-                    description: 'Default: true'
+                    description: 'Default: true Deprecated: DSP V1 only, will be removed
+                      in the future.'
                     type: boolean
-                type: object
-              crdviewer:
-                default:
-                  deploy: false
-                properties:
-                  deploy:
-                    default: true
-                    type: boolean
-                  image:
-                    type: string
                 type: object
               database:
                 default:
@@ -191,6 +214,16 @@ spec:
                   DS Pipelines metadata tracking. Specify either the default MariaDB
                   deployment, or configure your own External SQL DB.
                 properties:
+                  customExtraParams:
+                    description: "CustomExtraParams allow users to further customize
+                      the sql dsn parameters used by the Pipeline Server when opening
+                      a connection with the Database. ref: https://github.com/go-sql-driver/mysql?tab=readme-ov-file#dsn-data-source-name
+                      \n Value must be a JSON string. For example, to disable tls
+                      for Pipeline Server DB connection the user can provide a string:
+                      {\"tls\":\"true\"} \n If updating post DSPA deployment, then
+                      a manual restart of the pipeline server pod will be required
+                      so the new configmap may be consumed."
+                    type: string
                   disableHealthCheck:
                     default: false
                     description: 'Default: false'
@@ -318,6 +351,9 @@ spec:
                     type: boolean
                   envoy:
                     properties:
+                      deployRoute:
+                        default: true
+                        type: boolean
                       image:
                         type: string
                       resources:
@@ -405,6 +441,8 @@ spec:
                         type: object
                     type: object
                   writer:
+                    description: 'Deprecated: DSP V1 only, will be removed in the
+                      future.'
                     properties:
                       image:
                         type: string
@@ -523,6 +561,8 @@ spec:
                   externalStorage:
                     properties:
                       basePath:
+                        description: Subpath where objects should be stored for this
+                          DSPA
                         type: string
                       bucket:
                         type: string
@@ -541,7 +581,8 @@ spec:
                           secretKey:
                             type: string
                           secretName:
-                            description: 'Note: In V2 this value needs to be mlpipeline-minio-artifact'
+                            description: The name of the Secret where the AccessKey
+                              and SecretKey are defined.
                             type: string
                         required:
                         - accessKey
@@ -636,7 +677,8 @@ spec:
                           secretKey:
                             type: string
                           secretName:
-                            description: 'Note: In V2 this value needs to be mlpipeline-minio-artifact'
+                            description: The name of the Secret where the AccessKey
+                              and SecretKey are defined.
                             type: string
                         required:
                         - accessKey
@@ -769,11 +811,48 @@ spec:
                 properties:
                   argoExecImage:
                     type: string
+                  customConfig:
+                    type: string
                   deploy:
                     default: true
                     type: boolean
                   image:
                     type: string
+                  resources:
+                    description: Specify custom Pod resource requirements for this
+                      component.
+                    properties:
+                      limits:
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      requests:
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
                 type: object
             required:
             - objectStorage

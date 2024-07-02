@@ -8,12 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       previous_release_tag:
-        default: 'v1.x.y'
+        default: 'v2.x.y'
         description: 'Previous Release tag'
         required: true
       target_release:
-        default: '1.x'
-        description: 'Target Minor Release (e.g. 1.2, 1.3, etc.)'
+        default: '2.x'
+        description: 'Target Minor Release (e.g. 2.1, 2.2, etc.)'
         required: true
       gh_org:
         default: 'opendatahub-io'
@@ -25,7 +25,7 @@ on:
         description: 'Quay Organization to push builds.'
         required: true
       overwrite_imgs:
-        default: 'true'
+        default: 'false'
         description: 'Overwrite images in quay if they already exist for this release.'
         required: true
 env:
@@ -62,7 +62,7 @@ jobs:
           GH_USER_NAME: ${{ env.GH_USER_NAME }}
           GH_USER_EMAIL: ${{ env.GH_USER_EMAIL }}
           TARGET_RELEASE: ${{ env.TARGET_RELEASE }}
-          MINOR_RELEASE_WILDCARD: ${{ env.MINOR_RELEASE_WILDCARD }}
+          MINOR_RELEASE_WILDCARD: ${{ inputs.target_release }}
           MINOR_RELEASE_BRANCH: ${{ env.MINOR_RELEASE_BRANCH }}
           DSPO_REPOSITORY_FULL: ${{ env.DSPO_REPOSITORY_FULL }}
           DSPO_REPOSITORY: ${{ env.DSPO_REPOSITORY }}

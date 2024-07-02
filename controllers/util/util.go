@@ -17,16 +17,14 @@ limitations under the License.
 package util
 
 import (
+	"github.com/opendatahub-io/data-science-pipelines-operator/controllers/config"
 	"os"
 	"path/filepath"
 
 	"context"
 	"crypto/x509"
-	"fmt"
-	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"net/url"
@@ -82,24 +80,45 @@ func IsX509UnknownAuthorityError(err error) bool {
 	return ok
 }
 
-// GetConfigMapValue fetches the value for the provided configmap mapped to a given key
-func GetConfigMapValue(ctx context.Context, cfgKey, cfgName, ns string, client client.Client, log logr.Logger) (error, string) {
+func GetConfigMap(ctx context.Context, cfgName, ns string, client client.Client) (*v1.ConfigMap, error) {
 	cfgMap := &v1.ConfigMap{}
 	namespacedName := types.NamespacedName{
 		Name:      cfgName,
 		Namespace: ns,
 	}
 	err := client.Get(ctx, namespacedName, cfgMap)
-	if err != nil && apierrs.IsNotFound(err) {
-		log.Error(err, fmt.Sprintf("ConfigMap [%s] was not found in namespace [%s]", cfgName, ns))
-		return err, ""
-	} else if err != nil {
-		log.Error(err, fmt.Sprintf("Encountered error when attempting to fetch ConfigMap. [%s]..", cfgName))
-		return err, ""
+	if err != nil {
+		return &v1.ConfigMap{}, err
 	}
+	return cfgMap, nil
+}
+
+// GetConfigMapValue fetches the value for the provided configmap mapped to a given key
+func GetConfigMapValue(cfgKey string, cfgMap *v1.ConfigMap) string {
 	if val, ok := cfgMap.Data[cfgKey]; ok {
-		return nil, val
+		return val
 	} else {
-		return fmt.Errorf("ConfigMap %s sdoes not contain specified key %s", cfgName, cfgKey), ""
+		return ""
 	}
+}
+
+// GetConfigMapValues fetches the value for the provided configmap mapped to a given key
+func GetConfigMapValues(cfgMap *v1.ConfigMap) []string {
+	var values []string
+	for _, val := range cfgMap.Data {
+		values = append(values, val)
+	}
+	return values
+}
+
+func GetSystemCerts() ([]byte, error) {
+	sslCertFile := os.Getenv(config.DefaultSystemSSLCertFile)
+	if sslCertFile == "" {
+		sslCertFile = config.DefaultSystemSSLCertFilePath
+	}
+	data, err := os.ReadFile(sslCertFile)
+	if err != nil {
+		return []byte{}, err
+	}
+	return data, err
 }

@@ -112,23 +112,12 @@ jobs:
         shell: bash
         run: ./.github/scripts/release_create/create_tag_release.sh
 
-  sync_manifests:
-    name: Sync ODH Manifests
-    uses: ./.github/workflows/odh-manifests-PR-sync.yml
-    needs: fetch-data
-    with:
-      src_branch: ${{ needs.fetch-data.outputs.release_branch }}
-      target_tag: ${{ needs.fetch-data.outputs.target_version_tag }}
-      odh_manifest_org: ${{ needs.fetch-data.outputs.odh_org }}
-    secrets: inherit
-
   notify_pr:
     name: Report Feedback
     runs-on: ubuntu-latest
     needs:
       - validate_pr
       - fetch-data
-      - sync_manifests
       - create_dspo_tag_release
       - create_dsp_tag_release
     steps:

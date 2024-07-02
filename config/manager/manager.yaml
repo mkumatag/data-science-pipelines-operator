@@ -59,8 +59,6 @@ spec:
             value: $(IMAGES_MLMDGRPC)
           - name: IMAGES_MLMDWRITER
             value: $(IMAGES_MLMDWRITER)
-          - name: IMAGES_CRDVIEWER
-            value: $(IMAGES_CRDVIEWER)
           - name: IMAGESV2_ARGO_APISERVER
             value: $(IMAGESV2_ARGO_APISERVER)
           - name: IMAGESV2_ARGO_PERSISTENCEAGENT
@@ -83,8 +81,16 @@ spec:
             value: $(ZAP_LOG_LEVEL)
           - name: MAX_CONCURRENT_RECONCILES
             value: $(MAX_CONCURRENT_RECONCILES)
-          - name: REQUEUE_TIME
-            value: $(REQUEUE_TIME)
+          - name: DSPO_REQUEUE_TIME
+            value: $(DSPO_REQUEUE_TIME)
+          - name: DSPO_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          # DSPO_APISERVER_INCLUDE_OWNERREFERENCE is intended to be used only for tests.
+          # It must always be enabled in production
+          - name: DSPO_APISERVER_INCLUDE_OWNERREFERENCE
+            value: $(DSPO_APISERVER_INCLUDE_OWNERREFERENCE)
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -107,8 +113,8 @@ spec:
             cpu: 1
             memory: 4Gi
           requests:
-            cpu: 10m
-            memory: 64Mi
+            cpu: 200m
+            memory: 400Mi
         volumeMounts:
           - mountPath: /home/config
             name: config

@@ -113,6 +113,11 @@ spec:
           image: api-server:test2
           imagePullPolicy: Always
           name: ds-pipeline-api-server
+          command: ['/bin/apiserver']
+          args:
+            - --config=/config
+            - -logtostderr=true
+            - --sampleconfig=/config/sample_config.json
           ports:
             - containerPort: 8888
               name: http
@@ -152,6 +157,9 @@ spec:
               cpu: 2522m
               memory: 5Gi
           volumeMounts:
+            - name: server-config
+              mountPath: /config/config.json
+              subPath: testserverconfigmapkeydspa2
             - mountPath: /config/sample_config.json
               name: sample-config
               subPath: sample_config.json
@@ -209,6 +217,10 @@ spec:
           secret:
             secretName: ds-pipelines-proxy-tls-testdsp2
             defaultMode: 420
+        - name: server-config
+          configMap:
+            defaultMode: 420
+            name: testserverconfigmapdspa2
         - configMap:
             defaultMode: 420
             name: sample-config-testdsp2
